@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+            xmlns:hpb="http://harbourpoint.example/bank/v1"
+            targetNamespace="http://harbourpoint.example/bank/v1"
+            elementFormDefault="qualified">
+
+  <xsd:include schemaLocation="../HPB_CommonLib/hpb-common.xsd"/>
+
+  <xsd:simpleType name="TransferStatus">
+    <xsd:restriction base="xsd:string">
+      <xsd:enumeration value="ACCEPTED"/>
+      <xsd:enumeration value="COMPLETED"/>
+      <xsd:enumeration value="REJECTED"/>
+      <xsd:enumeration value="COMPENSATED"/>
+    </xsd:restriction>
+  </xsd:simpleType>
+
+  <xsd:element name="InitiateTransferRequest">
+    <xsd:complexType><xsd:sequence>
+      <xsd:element name="clientRef"   type="xsd:string"/>
+      <xsd:element name="fromAccount" type="xsd:string"/>
+      <xsd:element name="toAccount"   type="xsd:string"/>
+      <xsd:element name="amount"      type="xsd:decimal"/>
+      <xsd:element name="narrative"   type="xsd:string" minOccurs="0"/>
+    </xsd:sequence></xsd:complexType>
+  </xsd:element>
+  <xsd:element name="InitiateTransferResponse">
+    <xsd:complexType><xsd:sequence>
+      <xsd:element name="transferId"          type="xsd:string"/>
+      <xsd:element name="status"              type="hpb:TransferStatus"/>
+      <xsd:element name="feeAmount"           type="xsd:decimal"/>
+      <xsd:element name="valueDate"           type="xsd:date" minOccurs="0"/>
+      <xsd:element name="idempotentReplay"    type="xsd:boolean"/>
+    </xsd:sequence></xsd:complexType>
+  </xsd:element>
+
+  <xsd:element name="GetTransferStatusRequest">
+    <xsd:complexType><xsd:choice>
+      <xsd:element name="transferId" type="xsd:string"/>
+      <xsd:element name="clientRef"  type="xsd:string"/>
+    </xsd:choice></xsd:complexType>
+  </xsd:element>
+  <xsd:element name="GetTransferStatusResponse">
+    <xsd:complexType><xsd:sequence>
+      <xsd:element name="transferId"  type="xsd:string"/>
+      <xsd:element name="clientRef"   type="xsd:string"/>
+      <xsd:element name="fromAccount" type="xsd:string"/>
+      <xsd:element name="toAccount"   type="xsd:string"/>
+      <xsd:element name="amount"      type="xsd:decimal"/>
+      <xsd:element name="feeAmount"   type="xsd:decimal"/>
+      <xsd:element name="valueDate"   type="xsd:date" minOccurs="0"/>
+      <xsd:element name="status"      type="hpb:TransferStatus"/>
+    </xsd:sequence></xsd:complexType>
+  </xsd:element>
+</xsd:schema>

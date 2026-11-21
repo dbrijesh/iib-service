@@ -1,0 +1,8 @@
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:hpb="http://harbourpoint.example/bank/v1">
+  <soapenv:Header>
+    <hpb:Header><hpb:ChannelId>WEB</hpb:ChannelId></hpb:Header>
+  </soapenv:Header>
+  <soapenv:Body>
+    <hpb:InitiateTransferRequest><hpb:clientRef>DEMO-0003</hpb:clientRef><hpb:fromAccount>HPB10000001</hpb:fromAccount><hpb:toAccount>HPB10000040</hpb:toAccount><hpb:amount>10.00</hpb:amount><hpb:narrative>Credit hits balance ceiling</hpb:narrative></hpb:InitiateTransferRequest>
+  </soapenv:Body>
+</soapenv:Envelope>

@@ -1,0 +1,19 @@
+* Harbour Point Bank - queue manager HPBQM1 (MQ Advanced for Developers container)
+* Loaded automatically from /etc/mqm/*.mqsc at start-up.
+
+* ---- Simulated mainframe (CoreStub) ----------------------------------------
+DEFINE QLOCAL('CORE.CUST.REQ')  REPLACE MAXDEPTH(5000) DEFPSIST(NO) +
+       BOQNAME('CORE.CUST.REQ.BACKOUT') BOTHRESH(3)
+DEFINE QLOCAL('CORE.CUST.REQ.BACKOUT') REPLACE
+DEFINE QLOCAL('CORE.CUST.RPLY') REPLACE MAXDEPTH(5000) DEFPSIST(NO)
+
+* ---- Transfer events (PaymentService publishes, a sink queue lets you see them) ----
+DEFINE TOPIC('HPB.TRANSFERS') REPLACE TOPICSTR('HPB/TRANSFERS')
+DEFINE QLOCAL('HPB.TRANSFERS.SINK') REPLACE MAXDEPTH(10000)
+DEFINE SUB('HPB.TRANSFERS.SUB') REPLACE TOPICSTR('HPB/TRANSFERS/#') +
+       DEST('HPB.TRANSFERS.SINK')
+
+* ---- Dev-only access: no channel auth, no password check ------------------------
+ALTER QMGR CHLAUTH(DISABLED)
+ALTER AUTHINFO('SYSTEM.DEFAULT.AUTHINFO.IDPWOS') AUTHTYPE(IDPWOS) CHCKCLNT(NONE)
+REFRESH SECURITY TYPE(CONNAUTH)

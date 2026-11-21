@@ -1,0 +1,98 @@
+BROKER SCHEMA hpb.corestub
+
+/* Plays the mainframe. Reads CUSTREC / CUSTUPD from CORE.CUST.REQ, works on the
+   mainframe.customer table, and answers on the ReplyToQ with a CUSTREC image,
+   CorrelId = request MsgId. Return code 00 ok, 04 not found, 08 error. */
+
+CREATE PROCEDURE ReplyImage(IN o REFERENCE, IN mqmd REFERENCE, IN found BOOLEAN, IN r REFERENCE,
+                            IN custId CHARACTER, IN rc CHARACTER)
+BEGIN
+	SET o.Properties.MessageDomain = 'DFDL';
+	SET o.Properties.MessageSet    = 'HPB_CustomerService';
+	SET o.Properties.MessageType   = '{}:CUSTREC';
+	SET o.MQMD = mqmd;
+	SET o.MQMD.CorrelId = mqmd.MsgId;
+	SET o.MQMD.MsgId    = X'000000000000000000000000000000000000000000000000';
+	SET o.DFDL.CUSTREC.FUNC_CODE   = 'R';
+	SET o.DFDL.CUSTREC.CUST_ID     = custId;
+	SET o.DFDL.CUSTREC.CUST_NAME   = CASE WHEN found THEN TRIM(r.cust_name) ELSE '' END;
+	SET o.DFDL.CUSTREC.DOB         = CASE WHEN found THEN r.dob ELSE '00000000' END;
+	SET o.DFDL.CUSTREC.EMAIL       = CASE WHEN found THEN TRIM(r.email) ELSE '' END;
+	SET o.DFDL.CUSTREC.PHONE       = CASE WHEN found THEN TRIM(r.phone) ELSE '' END;
+	SET o.DFDL.CUSTREC.ADDR1       = CASE WHEN found THEN TRIM(r.addr1) ELSE '' END;
+	SET o.DFDL.CUSTREC.ADDR2       = CASE WHEN found THEN TRIM(r.addr2) ELSE '' END;
+	SET o.DFDL.CUSTREC.ADDR3       = CASE WHEN found THEN TRIM(r.addr3) ELSE '' END;
+	SET o.DFDL.CUSTREC.ADDR4       = CASE WHEN found THEN TRIM(r.addr4) ELSE '' END;
+	SET o.DFDL.CUSTREC.KYC_STATUS  = CASE WHEN found THEN TRIM(r.kyc_status) ELSE ' ' END;
+	SET o.DFDL.CUSTREC.REL_VALUE   = CASE WHEN found THEN r.rel_value ELSE CAST(0 AS DECIMAL) END;
+	SET o.DFDL.CUSTREC.RETURN_CODE = rc;
+	SET o.DFDL.CUSTREC.FILLER      = '';
+END;
+
+/* Peek at the first byte (FUNC-CODE) and send R and U down different paths */
+CREATE COMPUTE MODULE Stub_Route
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE f CHARACTER CAST(SUBSTRING(InputRoot.BLOB.BLOB FROM 1 FOR 1) AS CHARACTER CCSID 819);
+		SET OutputRoot = InputRoot;
+		IF f = 'U' THEN
+			PROPAGATE TO TERMINAL 'out1';
+		ELSE
+			PROPAGATE TO TERMINAL 'out';
+		END IF;
+		RETURN FALSE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE Stub_Read
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE custId CHARACTER TRIM(InputRoot.DFDL.CUSTREC.CUST_ID);
+		DECLARE rc CHARACTER '00';
+		BEGIN
+			DECLARE EXIT HANDLER FOR SQLSTATE LIKE '%' SET rc = '08';
+			IF InputRoot.DFDL.CUSTREC.FUNC_CODE <> 'R' THEN
+				SET rc = '08';
+			ELSE
+				SET Environment.Cust.Row[] = PASSTHRU('SELECT * FROM mainframe.customer WHERE cust_id = ?', custId);
+				IF CARDINALITY(Environment.Cust.Row[]) = 0 THEN SET rc = '04'; END IF;
+			END IF;
+		END;
+		CALL ReplyImage(OutputRoot, InputRoot.MQMD, (rc = '00'), Environment.Cust.Row[1], custId, rc);
+		SET LocalEnvironment.Destination.MQ.DestinationData[1].queueName = COALESCE(InputRoot.MQMD.ReplyToQ, 'CORE.CUST.RPLY');
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* CUSTUPD: per field flag N = unchanged, S = set, C = clear */
+CREATE COMPUTE MODULE Stub_Update
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE u REFERENCE TO InputRoot.DFDL.CUSTUPD;
+		DECLARE custId CHARACTER TRIM(u.CUST_ID);
+		DECLARE rc CHARACTER '00';
+		BEGIN
+			DECLARE EXIT HANDLER FOR SQLSTATE LIKE '%' SET rc = '08';
+			SET Environment.Cust.Row[] = PASSTHRU('SELECT cust_id FROM mainframe.customer WHERE cust_id = ?', custId);
+			IF CARDINALITY(Environment.Cust.Row[]) = 0 THEN
+				SET rc = '04';
+			ELSE
+				PASSTHRU('UPDATE mainframe.customer SET ' ||
+				         'email = CASE ? WHEN ''S'' THEN ? WHEN ''C'' THEN '''' ELSE email END, ' ||
+				         'phone = CASE ? WHEN ''S'' THEN ? WHEN ''C'' THEN '''' ELSE phone END, ' ||
+				         'addr1 = CASE ? WHEN ''S'' THEN ? WHEN ''C'' THEN '''' ELSE addr1 END, ' ||
+				         'addr2 = CASE ? WHEN ''S'' THEN ? WHEN ''C'' THEN '''' ELSE addr2 END, ' ||
+				         'addr3 = CASE ? WHEN ''S'' THEN ? WHEN ''C'' THEN '''' ELSE addr3 END, ' ||
+				         'addr4 = CASE ? WHEN ''S'' THEN ? WHEN ''C'' THEN '''' ELSE addr4 END ' ||
+				         'WHERE cust_id = ?',
+				         u.EMAIL_FLAG, TRIM(u.EMAIL), u.PHONE_FLAG, TRIM(u.PHONE),
+				         u.ADDR1_FLAG, TRIM(u.ADDR1), u.ADDR2_FLAG, TRIM(u.ADDR2),
+				         u.ADDR3_FLAG, TRIM(u.ADDR3), u.ADDR4_FLAG, TRIM(u.ADDR4), custId);
+				SET Environment.Cust.Row[] = PASSTHRU('SELECT * FROM mainframe.customer WHERE cust_id = ?', custId);
+			END IF;
+		END;
+		CALL ReplyImage(OutputRoot, InputRoot.MQMD, (rc = '00'), Environment.Cust.Row[1], custId, rc);
+		SET LocalEnvironment.Destination.MQ.DestinationData[1].queueName = COALESCE(InputRoot.MQMD.ReplyToQ, 'CORE.CUST.RPLY');
+		RETURN TRUE;
+	END;
+END MODULE;

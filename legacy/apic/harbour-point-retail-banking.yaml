@@ -1,0 +1,41 @@
+# One product for the whole retail banking estate.
+product: 1.0.0
+info:
+  version: 1.0.0
+  title: harbour-point-retail-banking
+  name: harbour-point-retail-banking
+  description: Harbour Point Bank retail SOAP services published through API Connect
+gateways:
+  - datapower-api-gateway
+visibility:
+  view:
+    type: public
+  subscribe:
+    type: authenticated
+apis:
+  customer-service-soap:
+    $ref: customer-service-soap.yaml
+  account-service-soap:
+    $ref: account-service-soap.yaml
+  payment-service-soap:
+    $ref: payment-service-soap.yaml
+plans:
+  internal:
+    title: Internal
+    description: Internal channels. All three APIs.
+    rate-limits:
+      default:
+        value: 600/1minute
+        hard-limit: true
+    approval: false
+  partner:
+    title: Partner
+    description: Partner channel. Customer and Account only; PaymentService is excluded.
+    rate-limits:
+      default:
+        value: 60/1minute
+        hard-limit: true
+    approval: true
+    apis:
+      customer-service-soap: {}
+      account-service-soap: {}

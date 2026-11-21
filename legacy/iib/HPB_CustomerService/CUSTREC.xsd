@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DFDL model for COBOL copybook CUSTREC (250 bytes, fixed length).
+
+       01 CUSTREC.
+          05 FUNC-CODE     PIC X(1).           R = read, U = update (reply echoes R)
+          05 CUST-ID       PIC X(10).
+          05 CUST-NAME     PIC X(40).
+          05 DOB           PIC 9(8).           CCYYMMDD, 00000000 = unknown
+          05 EMAIL         PIC X(50).
+          05 PHONE         PIC X(15).
+          05 ADDR1..ADDR4  PIC X(25) x 4.
+          05 KYC-STATUS    PIC X(1).           V / P / R
+          05 REL-VALUE     PIC S9(11)V99 COMP-3.   7 bytes, sign in the last nibble
+          05 RETURN-CODE   PIC 9(2).           00 ok, 04 not found, 08 error
+          05 FILLER        PIC X(16).
+-->
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+            xmlns:dfdl="http://www.ogf.org/dfdl/dfdl-1.0/"
+            xmlns:ibmDfdlExtn="http://www.ibm.com/dfdl/extensions">
+
+  <xsd:include schemaLocation="IBMdefined/GeneralPurposeFormat.xsd"/>
+
+  <xsd:annotation>
+    <xsd:appinfo source="http://www.ogf.org/dfdl/">
+      <dfdl:format ref="GeneralPurposeFormat" lengthKind="explicit" lengthUnits="bytes"
+                   encoding="ISO-8859-1" representation="text"
+                   textPadKind="padChar" textTrimKind="padChar"
+                   textStringPadCharacter="%SP;" textStringJustification="left"
+                   initiator="" terminator="" separator="" occursCountKind="fixed"/>
+    </xsd:appinfo>
+  </xsd:annotation>
+
+  <xsd:element name="CUSTREC">
+    <xsd:complexType>
+      <xsd:sequence dfdl:separator="" dfdl:initiatedContent="no">
+        <xsd:element name="FUNC_CODE"   type="xsd:string" dfdl:length="1"/>
+        <xsd:element name="CUST_ID"     type="xsd:string" dfdl:length="10"/>
+        <xsd:element name="CUST_NAME"   type="xsd:string" dfdl:length="40"/>
+        <xsd:element name="DOB"         type="xsd:string" dfdl:length="8"/>
+        <xsd:element name="EMAIL"       type="xsd:string" dfdl:length="50"/>
+        <xsd:element name="PHONE"       type="xsd:string" dfdl:length="15"/>
+        <xsd:element name="ADDR1"       type="xsd:string" dfdl:length="25"/>
+        <xsd:element name="ADDR2"       type="xsd:string" dfdl:length="25"/>
+        <xsd:element name="ADDR3"       type="xsd:string" dfdl:length="25"/>
+        <xsd:element name="ADDR4"       type="xsd:string" dfdl:length="25"/>
+        <xsd:element name="KYC_STATUS"  type="xsd:string" dfdl:length="1"/>
+        <!-- COMP-3: 13 digits + sign nibble = 7 bytes, 2 implied decimals -->
+        <xsd:element name="REL_VALUE"   type="xsd:decimal"
+                     dfdl:representation="binary" dfdl:binaryNumberRep="packed"
+                     dfdl:binaryDecimalVirtualPoint="2" dfdl:length="7"
+                     dfdl:binaryPackedSignCodes="C D F C"/>
+        <xsd:element name="RETURN_CODE" type="xsd:string" dfdl:length="2"/>
+        <xsd:element name="FILLER"      type="xsd:string" dfdl:length="16"/>
+      </xsd:sequence>
+    </xsd:complexType>
+  </xsd:element>
+</xsd:schema>

@@ -1,0 +1,21 @@
+# Integration server settings for the Harbour Point legacy estate.
+# Merge into the work directory's server.conf.yaml.
+serverName: 'hpb-legacy'
+defaultApplication: ''
+
+# SOAP over HTTP for local testing. API Connect calls the HTTPS port in real use.
+ResourceManagers:
+  HTTPConnector:
+    ListenerPort: 7800
+  HTTPSConnector:
+    ListenerPort: 7843
+
+# Default queue manager for MQInput / MQOutput / MQGet
+Defaults:
+  queueManagerName: 'HPBQM1'
+
+# Pin the London clock for R12 / R14 boundary tests (format 'YYYY-MM-DD HHMM').
+# Leave empty for real time.
+UserVariables:
+  hpb.payment:
+    ClockOverride: ''

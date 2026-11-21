@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<projectDescription>
+  <name>HPB_CustomerService</name>
+  <comment></comment>
+  <projects>
+    <project>HPB_CommonLib</project>
+  </projects>
+  <buildSpec>
+    <buildCommand><name>com.ibm.etools.mft.applib.applibbuilder</name><arguments></arguments></buildCommand>
+    <buildCommand><name>com.ibm.etools.mft.flow.adapters.adapterbuilder</name><arguments></arguments></buildCommand>
+    <buildCommand><name>com.ibm.etools.mft.flow.msgflowbuilder</name><arguments></arguments></buildCommand>
+    <buildCommand><name>com.ibm.etools.mft.esql.esqlbuilder</name><arguments></arguments></buildCommand>
+  </buildSpec>
+  <natures>
+    <nature>com.ibm.etools.msgbroker.tooling.applicationNature</nature>
+    <nature>com.ibm.etools.msgbroker.tooling.messageBrokerProjectNature</nature>
+    <nature>com.ibm.etools.mft.applib.applibnature</nature>
+  </natures>
+</projectDescription>

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+            xmlns:hpb="http://harbourpoint.example/bank/v1"
+            targetNamespace="http://harbourpoint.example/bank/v1"
+            elementFormDefault="qualified">
+
+  <xsd:include schemaLocation="../HPB_CommonLib/hpb-common.xsd"/>
+
+  <xsd:complexType name="CustomerProfile">
+    <xsd:sequence>
+      <xsd:element name="customerId"        type="xsd:string"/>
+      <xsd:element name="name"              type="xsd:string"/>
+      <xsd:element name="dateOfBirth"       type="xsd:date"    minOccurs="0"/>
+      <xsd:element name="email"             type="xsd:string"  minOccurs="0"/>
+      <xsd:element name="phone"             type="xsd:string"  minOccurs="0"/>
+      <xsd:element name="addressLine1"      type="xsd:string"  minOccurs="0"/>
+      <xsd:element name="addressLine2"      type="xsd:string"  minOccurs="0"/>
+      <xsd:element name="addressLine3"      type="xsd:string"  minOccurs="0"/>
+      <xsd:element name="addressLine4"      type="xsd:string"  minOccurs="0"/>
+      <xsd:element name="kycStatus"         type="hpb:KycStatus"/>
+      <xsd:element name="relationshipValue" type="xsd:decimal"/>
+    </xsd:sequence>
+  </xsd:complexType>
+
+  <xsd:simpleType name="KycStatus">
+    <xsd:restriction base="xsd:string">
+      <xsd:enumeration value="VERIFIED"/>
+      <xsd:enumeration value="PENDING"/>
+      <xsd:enumeration value="REFER"/>
+    </xsd:restriction>
+  </xsd:simpleType>
+
+  <xsd:element name="GetCustomerProfileRequest">
+    <xsd:complexType><xsd:sequence>
+      <xsd:element name="customerId" type="xsd:string"/>
+    </xsd:sequence></xsd:complexType>
+  </xsd:element>
+  <xsd:element name="GetCustomerProfileResponse" type="hpb:CustomerProfile"/>
+
+  <!-- R3: an absent element leaves the field alone; a present but empty element clears it -->
+  <xsd:element name="UpdateContactDetailsRequest">
+    <xsd:complexType><xsd:sequence>
+      <xsd:element name="customerId"   type="xsd:string"/>
+      <xsd:element name="email"        type="xsd:string" minOccurs="0"/>
+      <xsd:element name="phone"        type="xsd:string" minOccurs="0"/>
+      <xsd:element name="addressLine1" type="xsd:string" minOccurs="0"/>
+      <xsd:element name="addressLine2" type="xsd:string" minOccurs="0"/>
+      <xsd:element name="addressLine3" type="xsd:string" minOccurs="0"/>
+      <xsd:element name="addressLine4" type="xsd:string" minOccurs="0"/>
+    </xsd:sequence></xsd:complexType>
+  </xsd:element>
+  <xsd:element name="UpdateContactDetailsResponse" type="hpb:CustomerProfile"/>
+</xsd:schema>

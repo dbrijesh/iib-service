@@ -1,0 +1,112 @@
+# Payment Service proxy API. Exported shape: OpenAPI 2.0 with IBM extensions.
+swagger: '2.0'
+info:
+  title: payment-service-soap
+  x-ibm-name: payment-service-soap
+  version: 1.0.0
+  description: SOAP proxy for IIB application HPB_PaymentService. Consumers never call IIB directly.
+basePath: /hpb/payment
+schemes:
+  - https
+consumes:
+  - text/xml
+produces:
+  - text/xml
+securityDefinitions:
+  clientIdHeader:
+    type: apiKey
+    in: header
+    name: X-IBM-Client-Id
+  clientSecretHeader:
+    type: apiKey
+    in: header
+    name: X-IBM-Client-Secret
+  oauth:
+    type: oauth2
+    flow: application
+    tokenUrl: https://$(catalog.host)/hpb-oauth/token
+    scopes:
+      payments:write: Initiate and read payments
+    x-ibm-oauth-provider: hpb-oauth-provider
+security:
+  - clientIdHeader: []
+    clientSecretHeader: []
+    oauth:
+      - payments:write
+paths:
+  /PaymentService:
+    post:
+      operationId: PaymentService
+      summary: SOAP endpoint (all operations in PaymentService.wsdl)
+      parameters:
+        - name: body
+          in: body
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: SOAP response
+          schema:
+            type: string
+        '500':
+          description: SOAP fault with an hpb:Error detail
+          schema:
+            type: string
+x-ibm-configuration:
+  type: wsdl
+  wsdl-definition:
+    wsdl: ../iib/HPB_PaymentService/PaymentService.wsdl
+    service: PaymentService
+    port: PaymentServicePort
+  properties:
+    iib-host:
+      value: iib.hpb.local:7843
+      description: IIB integration server (HTTPS listener)
+      encoded: false
+    iib-user:
+      value: apic-gateway
+      encoded: false
+    iib-password:
+      value: change-me
+      encoded: true
+  cors:
+    enabled: false
+  gateway: datapower-api-gateway
+  assembly:
+    execute:
+      # 1. Add X-Correlation-ID when the caller sent none
+      - if:
+          title: ensure correlation id
+          version: 2.0.0
+          condition: "$not($exists(request.headers.x-correlation-id))"
+          execute:
+            - set-variable:
+                title: add X-Correlation-ID
+                version: 2.0.0
+                actions:
+                  - set: message.headers.X-Correlation-ID
+                    value: $(request.headers.x-global-transaction-id)
+      # 2. Copy the ChannelId from the client app's custom field into the SOAP header
+      - gatewayscript:
+          title: set ChannelId from client app
+          version: 2.0.0
+          source: file://set-channel.js
+      # 3. Call IIB over HTTPS with basic auth
+      - invoke:
+          title: invoke IIB
+          version: 2.0.0
+          verb: POST
+          target-url: https://$(iib-host)/payment
+          username: $(iib-user)
+          password: $(iib-password)
+          timeout: 30
+          persistent-connection: true
+          cache-response: no-cache
+    # 4. Gateway errors become the same hpb:Error fault shape
+    catch:
+      - default:
+          - gatewayscript:
+              title: gateway error to hpb fault
+              version: 2.0.0
+              source: file://gateway-fault.js

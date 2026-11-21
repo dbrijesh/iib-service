@@ -1,0 +1,8 @@
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:hpb="http://harbourpoint.example/bank/v1">
+  <soapenv:Header>
+    <hpb:Header><hpb:ChannelId>WEB</hpb:ChannelId></hpb:Header>
+  </soapenv:Header>
+  <soapenv:Body>
+    <hpb:GetAccountSummaryRequest><hpb:accountId>HPB10000001</hpb:accountId></hpb:GetAccountSummaryRequest>
+  </soapenv:Body>
+</soapenv:Envelope>

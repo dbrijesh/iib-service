@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DFDL model for COBOL copybook CUSTUPD (250 bytes, fixed length).
+  Each updatable field has a flag: N = leave unchanged, S = set, C = clear.
+
+       01 CUSTUPD.
+          05 FUNC-CODE   PIC X(1).        always U
+          05 CUST-ID     PIC X(10).
+          05 EMAIL-FLAG  PIC X(1).   05 EMAIL  PIC X(50).
+          05 PHONE-FLAG  PIC X(1).   05 PHONE  PIC X(15).
+          05 ADDR1-FLAG..ADDR4-FLAG PIC X(1), ADDR1..ADDR4 PIC X(25)
+          05 FILLER      PIC X(68).
+-->
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+            xmlns:dfdl="http://www.ogf.org/dfdl/dfdl-1.0/"
+            xmlns:ibmDfdlExtn="http://www.ibm.com/dfdl/extensions">
+
+  <xsd:include schemaLocation="IBMdefined/GeneralPurposeFormat.xsd"/>
+
+  <xsd:annotation>
+    <xsd:appinfo source="http://www.ogf.org/dfdl/">
+      <dfdl:format ref="GeneralPurposeFormat" lengthKind="explicit" lengthUnits="bytes"
+                   encoding="ISO-8859-1" representation="text"
+                   textPadKind="padChar" textTrimKind="padChar"
+                   textStringPadCharacter="%SP;" textStringJustification="left"
+                   initiator="" terminator="" separator="" occursCountKind="fixed"/>
+    </xsd:appinfo>
+  </xsd:annotation>
+
+  <xsd:element name="CUSTUPD">
+    <xsd:complexType>
+      <xsd:sequence dfdl:separator="" dfdl:initiatedContent="no">
+        <xsd:element name="FUNC_CODE"   type="xsd:string" dfdl:length="1"/>
+        <xsd:element name="CUST_ID"     type="xsd:string" dfdl:length="10"/>
+        <xsd:element name="EMAIL_FLAG"  type="xsd:string" dfdl:length="1"/>
+        <xsd:element name="EMAIL"       type="xsd:string" dfdl:length="50"/>
+        <xsd:element name="PHONE_FLAG"  type="xsd:string" dfdl:length="1"/>
+        <xsd:element name="PHONE"       type="xsd:string" dfdl:length="15"/>
+        <xsd:element name="ADDR1_FLAG"  type="xsd:string" dfdl:length="1"/>
+        <xsd:element name="ADDR1"       type="xsd:string" dfdl:length="25"/>
+        <xsd:element name="ADDR2_FLAG"  type="xsd:string" dfdl:length="1"/>
+        <xsd:element name="ADDR2"       type="xsd:string" dfdl:length="25"/>
+        <xsd:element name="ADDR3_FLAG"  type="xsd:string" dfdl:length="1"/>
+        <xsd:element name="ADDR3"       type="xsd:string" dfdl:length="25"/>
+        <xsd:element name="ADDR4_FLAG"  type="xsd:string" dfdl:length="1"/>
+        <xsd:element name="ADDR4"       type="xsd:string" dfdl:length="25"/>
+        <xsd:element name="FILLER"      type="xsd:string" dfdl:length="68"/>
+      </xsd:sequence>
+    </xsd:complexType>
+  </xsd:element>
+</xsd:schema>

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<wsdl:definitions name="CustomerService"
+    targetNamespace="http://harbourpoint.example/bank/v1"
+    xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"
+    xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:hpb="http://harbourpoint.example/bank/v1">
+
+  <wsdl:types>
+    <xsd:schema>
+      <xsd:import namespace="http://harbourpoint.example/bank/v1" schemaLocation="CustomerService.xsd"/>
+    </xsd:schema>
+  </wsdl:types>
+
+  <wsdl:message name="HeaderMsg"><wsdl:part name="header" element="hpb:Header"/></wsdl:message>
+  <wsdl:message name="ErrorMsg"><wsdl:part name="error" element="hpb:Error"/></wsdl:message>
+  <wsdl:message name="GetCustomerProfileIn"><wsdl:part name="parameters" element="hpb:GetCustomerProfileRequest"/></wsdl:message>
+  <wsdl:message name="GetCustomerProfileOut"><wsdl:part name="parameters" element="hpb:GetCustomerProfileResponse"/></wsdl:message>
+  <wsdl:message name="UpdateContactDetailsIn"><wsdl:part name="parameters" element="hpb:UpdateContactDetailsRequest"/></wsdl:message>
+  <wsdl:message name="UpdateContactDetailsOut"><wsdl:part name="parameters" element="hpb:UpdateContactDetailsResponse"/></wsdl:message>
+
+  <wsdl:portType name="CustomerServicePortType">
+    <wsdl:operation name="GetCustomerProfile">
+      <wsdl:input message="hpb:GetCustomerProfileIn"/>
+      <wsdl:output message="hpb:GetCustomerProfileOut"/>
+      <wsdl:fault name="Error" message="hpb:ErrorMsg"/>
+    </wsdl:operation>
+    <wsdl:operation name="UpdateContactDetails">
+      <wsdl:input message="hpb:UpdateContactDetailsIn"/>
+      <wsdl:output message="hpb:UpdateContactDetailsOut"/>
+      <wsdl:fault name="Error" message="hpb:ErrorMsg"/>
+    </wsdl:operation>
+  </wsdl:portType>
+
+  <wsdl:binding name="CustomerServiceBinding" type="hpb:CustomerServicePortType">
+    <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="GetCustomerProfile">
+      <soap:operation soapAction="http://harbourpoint.example/bank/v1/GetCustomerProfile" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal" parts="parameters"/>
+        <soap:header message="hpb:HeaderMsg" part="header" use="literal"/>
+      </wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+      <wsdl:fault name="Error"><soap:fault name="Error" use="literal"/></wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="UpdateContactDetails">
+      <soap:operation soapAction="http://harbourpoint.example/bank/v1/UpdateContactDetails" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal" parts="parameters"/>
+        <soap:header message="hpb:HeaderMsg" part="header" use="literal"/>
+      </wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+      <wsdl:fault name="Error"><soap:fault name="Error" use="literal"/></wsdl:fault>
+    </wsdl:operation>
+  </wsdl:binding>
+
+  <wsdl:service name="CustomerService">
+    <wsdl:port name="CustomerServicePort" binding="hpb:CustomerServiceBinding">
+      <soap:address location="http://localhost:7800/customer"/>
+    </wsdl:port>
+  </wsdl:service>
+</wsdl:definitions>

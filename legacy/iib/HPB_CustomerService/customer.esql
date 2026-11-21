@@ -1,0 +1,284 @@
+BROKER SCHEMA hpb.customer
+PATH hpb.common;
+
+DECLARE NS NAMESPACE 'http://harbourpoint.example/bank/v1';
+
+/* ------------------------------------------------------------------ */
+/* Copybook helpers                                                     */
+/* ------------------------------------------------------------------ */
+
+/* Fully populated CUSTREC request image (every field must be present for DFDL) */
+CREATE PROCEDURE NewCustrec(IN o REFERENCE, IN funcCode CHARACTER, IN custId CHARACTER)
+BEGIN
+	SET o.Properties.MessageDomain = 'DFDL';
+	SET o.Properties.MessageSet    = 'HPB_CustomerService';
+	SET o.Properties.MessageType   = '{}:CUSTREC';
+	SET o.MQMD.ReplyToQ = 'CORE.CUST.RPLY';
+	SET o.MQMD.Expiry   = 100;                         -- tenths of a second
+	SET o.DFDL.CUSTREC.FUNC_CODE   = funcCode;
+	SET o.DFDL.CUSTREC.CUST_ID     = custId;
+	SET o.DFDL.CUSTREC.CUST_NAME   = '';
+	SET o.DFDL.CUSTREC.DOB         = '00000000';
+	SET o.DFDL.CUSTREC.EMAIL       = '';
+	SET o.DFDL.CUSTREC.PHONE       = '';
+	SET o.DFDL.CUSTREC.ADDR1       = '';
+	SET o.DFDL.CUSTREC.ADDR2       = '';
+	SET o.DFDL.CUSTREC.ADDR3       = '';
+	SET o.DFDL.CUSTREC.ADDR4       = '';
+	SET o.DFDL.CUSTREC.KYC_STATUS  = ' ';
+	SET o.DFDL.CUSTREC.REL_VALUE   = CAST(0 AS DECIMAL);
+	SET o.DFDL.CUSTREC.RETURN_CODE = '00';
+	SET o.DFDL.CUSTREC.FILLER      = '';
+END;
+
+CREATE PROCEDURE NewCustupd(IN o REFERENCE, IN custId CHARACTER)
+BEGIN
+	SET o.Properties.MessageDomain = 'DFDL';
+	SET o.Properties.MessageSet    = 'HPB_CustomerService';
+	SET o.Properties.MessageType   = '{}:CUSTUPD';
+	SET o.MQMD.ReplyToQ = 'CORE.CUST.RPLY';
+	SET o.MQMD.Expiry   = 100;
+	SET o.DFDL.CUSTUPD.FUNC_CODE  = 'U';
+	SET o.DFDL.CUSTUPD.CUST_ID    = custId;
+	SET o.DFDL.CUSTUPD.EMAIL_FLAG = 'N';  SET o.DFDL.CUSTUPD.EMAIL = '';
+	SET o.DFDL.CUSTUPD.PHONE_FLAG = 'N';  SET o.DFDL.CUSTUPD.PHONE = '';
+	SET o.DFDL.CUSTUPD.ADDR1_FLAG = 'N';  SET o.DFDL.CUSTUPD.ADDR1 = '';
+	SET o.DFDL.CUSTUPD.ADDR2_FLAG = 'N';  SET o.DFDL.CUSTUPD.ADDR2 = '';
+	SET o.DFDL.CUSTUPD.ADDR3_FLAG = 'N';  SET o.DFDL.CUSTUPD.ADDR3 = '';
+	SET o.DFDL.CUSTUPD.ADDR4_FLAG = 'N';  SET o.DFDL.CUSTUPD.ADDR4 = '';
+	SET o.DFDL.CUSTUPD.FILLER     = '';
+END;
+
+/* ------------------------------------------------------------------ */
+/* R2: map a CUSTREC reply to the SOAP profile                          */
+/* ------------------------------------------------------------------ */
+CREATE PROCEDURE BuildProfileResponse(IN o REFERENCE, IN ctx REFERENCE, IN core REFERENCE, IN respName CHARACTER)
+BEGIN
+	SET o.Properties.MessageDomain = 'SOAP';
+	SET o.SOAP.Context = ctx;
+	CREATE LASTCHILD OF o.SOAP AS body NAME 'Body';
+	CREATE LASTCHILD OF body AS resp NAMESPACE NS NAME respName;
+
+	SET resp.NS:customerId = TRIM(core.CUST_ID);
+	SET resp.NS:name       = TRIM(core.CUST_NAME);
+	-- R2: DOB CCYYMMDD becomes xs:date; 00000000 means the element is left out
+	IF TRIM(core.DOB) <> '00000000' AND TRIM(core.DOB) <> '' THEN
+		SET resp.NS:dateOfBirth = SUBSTRING(core.DOB FROM 1 FOR 4) || '-' ||
+		                          SUBSTRING(core.DOB FROM 5 FOR 2) || '-' ||
+		                          SUBSTRING(core.DOB FROM 7 FOR 2);
+	END IF;
+	-- R2: padded text is trimmed; blank optional fields are left out
+	IF TRIM(core.EMAIL) <> '' THEN SET resp.NS:email        = TRIM(core.EMAIL); END IF;
+	IF TRIM(core.PHONE) <> '' THEN SET resp.NS:phone        = TRIM(core.PHONE); END IF;
+	IF TRIM(core.ADDR1) <> '' THEN SET resp.NS:addressLine1 = TRIM(core.ADDR1); END IF;
+	IF TRIM(core.ADDR2) <> '' THEN SET resp.NS:addressLine2 = TRIM(core.ADDR2); END IF;
+	IF TRIM(core.ADDR3) <> '' THEN SET resp.NS:addressLine3 = TRIM(core.ADDR3); END IF;
+	IF TRIM(core.ADDR4) <> '' THEN SET resp.NS:addressLine4 = TRIM(core.ADDR4); END IF;
+	-- R2: KYC V/P/R -> VERIFIED/PENDING/REFER
+	SET resp.NS:kycStatus = CASE TRIM(core.KYC_STATUS)
+	                          WHEN 'V' THEN 'VERIFIED'
+	                          WHEN 'P' THEN 'PENDING'
+	                          ELSE 'REFER'
+	                        END;
+	-- R2: COMP-3 REL-VALUE arrives from DFDL as a decimal; keep 2 places
+	SET resp.NS:relationshipValue = ROUND(core.REL_VALUE, 2);
+END;
+
+/* ------------------------------------------------------------------ */
+/* R4: phone numbers to E.164                                           */
+/* ------------------------------------------------------------------ */
+CREATE FUNCTION IsDigits(IN s CHARACTER) RETURNS BOOLEAN
+BEGIN
+	DECLARE i INTEGER 1;
+	WHILE i <= LENGTH(s) DO
+		IF SUBSTRING(s FROM i FOR 1) NOT BETWEEN '0' AND '9' THEN
+			RETURN FALSE;
+		END IF;
+		SET i = i + 1;
+	END WHILE;
+	RETURN TRUE;
+END;
+
+CREATE FUNCTION NormalisePhone(IN raw CHARACTER) RETURNS CHARACTER
+BEGIN
+	DECLARE p CHARACTER REPLACE(REPLACE(TRIM(raw), ' ', ''), '-', '');
+	IF SUBSTRING(p FROM 1 FOR 3) = '+44' THEN
+		SET p = SUBSTRING(p FROM 4);
+	ELSEIF SUBSTRING(p FROM 1 FOR 4) = '0044' THEN
+		SET p = SUBSTRING(p FROM 5);
+	ELSEIF SUBSTRING(p FROM 1 FOR 1) = '0' THEN
+		SET p = SUBSTRING(p FROM 2);                   -- leading 0 dropped
+	END IF;
+	IF LENGTH(p) <> 10 OR NOT IsDigits(p) THEN
+		CALL Fail('HPB-400-PHONE', 'Phone number must be 10 digits after +44', 'Client');
+	END IF;
+	RETURN '+44' || p;
+END;
+
+/* R3: translate present / absent / empty into a CUSTUPD flag and value */
+CREATE PROCEDURE FieldFlag(IN present BOOLEAN, IN val CHARACTER, IN clearOk BOOLEAN,
+                           IN fname CHARACTER, IN maxLen INTEGER,
+                           OUT flag CHARACTER, OUT outVal CHARACTER)
+BEGIN
+	SET flag = 'N';                                    -- absent: leave unchanged
+	SET outVal = '';
+	IF present THEN
+		IF TRIM(COALESCE(val, '')) = '' THEN           -- present but empty: clear
+			IF NOT clearOk THEN
+				CALL Fail('HPB-400-EMPTY', fname || ' cannot be cleared', 'Client');
+			END IF;
+			SET flag = 'C';
+		ELSE
+			SET flag = 'S';
+			SET outVal = TRIM(val);
+			IF LENGTH(outVal) > maxLen THEN
+				CALL Fail('HPB-400-TOO-LONG', fname || ' is longer than ' || CAST(maxLen AS CHARACTER) || ' characters', 'Client');
+			END IF;
+		END IF;
+	END IF;
+END;
+
+CREATE FUNCTION CleanCustomerId(IN raw CHARACTER) RETURNS CHARACTER
+BEGIN
+	DECLARE id CHARACTER UPPER(TRIM(COALESCE(raw, '')));
+	IF id = '' OR LENGTH(id) > 10 THEN
+		CALL Fail('HPB-400-CUSTOMER-ID', 'customerId is required (max 10 characters)', 'Client');
+	END IF;
+	RETURN id;
+END;
+
+/* ------------------------------------------------------------------ */
+/* Flow modules                                                         */
+/* ------------------------------------------------------------------ */
+
+CREATE COMPUTE MODULE Customer_Dispatch
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		IF Environment.HPB.Operation = 'GetCustomerProfileRequest' THEN
+			PROPAGATE TO TERMINAL 'out';
+		ELSEIF Environment.HPB.Operation = 'UpdateContactDetailsRequest' THEN
+			PROPAGATE TO TERMINAL 'out1';
+		ELSE
+			CALL Fail('HPB-400-OPERATION', 'Unknown operation', 'Client');
+		END IF;
+		RETURN FALSE;
+	END;
+END MODULE;
+
+/* GetCustomerProfile and the read half of UpdateContactDetails: function 'R' */
+CREATE COMPUTE MODULE Customer_BuildRead
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL NewCustrec(OutputRoot, 'R', CleanCustomerId(Environment.HPB.Req.NS:customerId));
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* Before MQGet: select the reply by CorrelId = MsgId of the request just put */
+CREATE COMPUTE MODULE Customer_SetGetKey
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		SET OutputRoot.MQMD.CorrelId = InputRoot.MQMD.MsgId;
+		SET OutputRoot.MQMD.MsgId    = X'000000000000000000000000000000000000000000000000';
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* R1: return codes 04 and 08 */
+CREATE COMPUTE MODULE Customer_CoreReply
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE rc CHARACTER TRIM(InputRoot.DFDL.CUSTREC.RETURN_CODE);
+		IF rc = '04' THEN
+			CALL Fail('HPB-404-CUSTOMER', 'Customer not found', 'Client');
+		ELSEIF rc <> '00' THEN
+			CALL Fail('HPB-500-CORE', 'Core system error, return code ' || rc, 'Server');
+		END IF;
+		SET Environment.HPB.Core = InputRoot.DFDL.CUSTREC;
+		SET OutputRoot = InputRoot;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* R1: MQGet waited 5 seconds with no reply */
+CREATE COMPUTE MODULE Customer_CoreTimeout
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL Fail('HPB-503-CORE-TIMEOUT', 'Core system did not reply within 5 seconds', 'Server');
+		RETURN FALSE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE GetProfile_Map
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL BuildProfileResponse(OutputRoot, Environment.HPB.Ctx, Environment.HPB.Core, 'GetCustomerProfileResponse');
+		SET Environment.HPB.Outcome = 'OK';
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* UpdateContactDetails, step 2: R5 KYC gate, R3 field semantics, R4 phone, build CUSTUPD */
+CREATE COMPUTE MODULE Update_Build
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE req REFERENCE TO Environment.HPB.Req;
+		DECLARE flag CHARACTER;
+		DECLARE val  CHARACTER;
+
+		-- R5
+		IF TRIM(Environment.HPB.Core.KYC_STATUS) = 'R' THEN
+			CALL Fail('HPB-409-KYC-REFER', 'Contact details cannot be changed while KYC status is REFER', 'Client');
+		END IF;
+
+		CALL NewCustupd(OutputRoot, TRIM(Environment.HPB.Core.CUST_ID));
+
+		CALL FieldFlag(EXISTS(req.NS:email[]), req.NS:email, FALSE, 'email', 50, flag, val);
+		SET OutputRoot.DFDL.CUSTUPD.EMAIL_FLAG = flag;
+		SET OutputRoot.DFDL.CUSTUPD.EMAIL      = val;
+		DECLARE changed BOOLEAN (flag <> 'N');
+
+		CALL FieldFlag(EXISTS(req.NS:phone[]), req.NS:phone, FALSE, 'phone', 15, flag, val);
+		IF flag = 'S' THEN SET val = NormalisePhone(val); END IF;      -- R4
+		SET OutputRoot.DFDL.CUSTUPD.PHONE_FLAG = flag;
+		SET OutputRoot.DFDL.CUSTUPD.PHONE      = val;
+		SET changed = changed OR (flag <> 'N');
+
+		CALL FieldFlag(EXISTS(req.NS:addressLine1[]), req.NS:addressLine1, FALSE, 'addressLine1', 25, flag, val);
+		SET OutputRoot.DFDL.CUSTUPD.ADDR1_FLAG = flag;
+		SET OutputRoot.DFDL.CUSTUPD.ADDR1      = val;
+		SET changed = changed OR (flag <> 'N');
+
+		-- R3: only addressLine2..4 may be cleared with an empty element
+		CALL FieldFlag(EXISTS(req.NS:addressLine2[]), req.NS:addressLine2, TRUE, 'addressLine2', 25, flag, val);
+		SET OutputRoot.DFDL.CUSTUPD.ADDR2_FLAG = flag;
+		SET OutputRoot.DFDL.CUSTUPD.ADDR2      = val;
+		SET changed = changed OR (flag <> 'N');
+
+		CALL FieldFlag(EXISTS(req.NS:addressLine3[]), req.NS:addressLine3, TRUE, 'addressLine3', 25, flag, val);
+		SET OutputRoot.DFDL.CUSTUPD.ADDR3_FLAG = flag;
+		SET OutputRoot.DFDL.CUSTUPD.ADDR3      = val;
+		SET changed = changed OR (flag <> 'N');
+
+		CALL FieldFlag(EXISTS(req.NS:addressLine4[]), req.NS:addressLine4, TRUE, 'addressLine4', 25, flag, val);
+		SET OutputRoot.DFDL.CUSTUPD.ADDR4_FLAG = flag;
+		SET OutputRoot.DFDL.CUSTUPD.ADDR4      = val;
+		SET changed = changed OR (flag <> 'N');
+
+		IF NOT changed THEN
+			CALL Fail('HPB-400-NO-FIELDS', 'No contact detail fields supplied', 'Client');
+		END IF;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE Update_Map
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL BuildProfileResponse(OutputRoot, Environment.HPB.Ctx, Environment.HPB.Core, 'UpdateContactDetailsResponse');
+		SET Environment.HPB.Outcome = 'OK';
+		RETURN TRUE;
+	END;
+END MODULE;

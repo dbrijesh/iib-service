@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ecore:EPackage xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI"
+    xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore"
+    xmlns:eflow="http://www.ibm.com/wbi/2005/eflow"
+    xmlns:utility="http://www.ibm.com/wbi/2005/eflow_utility"
+    xmlns:ComIbmCompute.msgnode="ComIbmCompute.msgnode"
+    xmlns:ComIbmMQGet.msgnode="ComIbmMQGet.msgnode"
+    xmlns:ComIbmMQOutput.msgnode="ComIbmMQOutput.msgnode"
+    nsURI="HPB_CustomerService/SF_CoreCall.subflow" nsPrefix="HPB_CustomerService_SF_CoreCall.subflow">
+  <eClassifiers xmi:type="eflow:FCMComposite" name="FCMComposite_1">
+    <eSuperTypes href="http://www.ibm.com/wbi/2005/eflow#//FCMBlock"/>
+    <composition>
+      <nodes xmi:type="eflow:FCMSource" xmi:id="InTerminal.In" location="20,40">
+        <translation xmi:type="utility:ConstantString" string="In"/>
+      </nodes>
+      <nodes xmi:type="eflow:FCMSink" xmi:id="OutTerminal.Out" location="840,40">
+        <translation xmi:type="utility:ConstantString" string="Out"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQOutput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_2" location="200,40" queueName="CORE.CUST.REQ">
+        <translation xmi:type="utility:ConstantString" string="Put CORE.CUST.REQ"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_3" location="360,40" computeExpression="esql://routine/hpb.customer#Customer_SetGetKey.Main">
+        <translation xmi:type="utility:ConstantString" string="Set CorrelId"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQGet.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_4" location="520,40" queueName="CORE.CUST.RPLY" requestTimeout="5000" messageDomainProperty="DFDL" messageSetProperty="HPB_CustomerService" messageTypeProperty="{}:CUSTREC" matchByCorrelId="true">
+        <translation xmi:type="utility:ConstantString" string="Get CORE.CUST.RPLY by CorrelId"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_5" location="680,40" computeExpression="esql://routine/hpb.customer#Customer_CoreReply.Main">
+        <translation xmi:type="utility:ConstantString" string="Check return code"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_6" location="680,140" computeExpression="esql://routine/hpb.customer#Customer_CoreTimeout.Main">
+        <translation xmi:type="utility:ConstantString" string="Reply timeout"/>
+      </nodes>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_1" targetNode="FCMComposite_1_2" sourceNode="InTerminal.In" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_2" targetNode="FCMComposite_1_3" sourceNode="FCMComposite_1_2" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_3" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_4" targetNode="FCMComposite_1_5" sourceNode="FCMComposite_1_4" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_5" targetNode="FCMComposite_1_6" sourceNode="FCMComposite_1_4" sourceTerminalName="OutTerminal.noMessage" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_6" targetNode="OutTerminal.Out" sourceNode="FCMComposite_1_5" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+    </composition>
+    <propertyOrganizer/>
+    <stickyBoard/>
+  </eClassifiers>
+</ecore:EPackage>

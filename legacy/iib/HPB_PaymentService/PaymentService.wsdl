@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<wsdl:definitions name="PaymentService"
+    targetNamespace="http://harbourpoint.example/bank/v1"
+    xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"
+    xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:hpb="http://harbourpoint.example/bank/v1">
+
+  <wsdl:types>
+    <xsd:schema>
+      <xsd:import namespace="http://harbourpoint.example/bank/v1" schemaLocation="PaymentService.xsd"/>
+    </xsd:schema>
+  </wsdl:types>
+
+  <wsdl:message name="HeaderMsg"><wsdl:part name="header" element="hpb:Header"/></wsdl:message>
+  <wsdl:message name="ErrorMsg"><wsdl:part name="error" element="hpb:Error"/></wsdl:message>
+  <wsdl:message name="InitiateTransferIn"><wsdl:part name="parameters" element="hpb:InitiateTransferRequest"/></wsdl:message>
+  <wsdl:message name="InitiateTransferOut"><wsdl:part name="parameters" element="hpb:InitiateTransferResponse"/></wsdl:message>
+  <wsdl:message name="GetTransferStatusIn"><wsdl:part name="parameters" element="hpb:GetTransferStatusRequest"/></wsdl:message>
+  <wsdl:message name="GetTransferStatusOut"><wsdl:part name="parameters" element="hpb:GetTransferStatusResponse"/></wsdl:message>
+
+  <wsdl:portType name="PaymentServicePortType">
+    <wsdl:operation name="InitiateTransfer">
+      <wsdl:input message="hpb:InitiateTransferIn"/>
+      <wsdl:output message="hpb:InitiateTransferOut"/>
+      <wsdl:fault name="Error" message="hpb:ErrorMsg"/>
+    </wsdl:operation>
+    <wsdl:operation name="GetTransferStatus">
+      <wsdl:input message="hpb:GetTransferStatusIn"/>
+      <wsdl:output message="hpb:GetTransferStatusOut"/>
+      <wsdl:fault name="Error" message="hpb:ErrorMsg"/>
+    </wsdl:operation>
+  </wsdl:portType>
+
+  <wsdl:binding name="PaymentServiceBinding" type="hpb:PaymentServicePortType">
+    <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="InitiateTransfer">
+      <soap:operation soapAction="http://harbourpoint.example/bank/v1/InitiateTransfer" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal" parts="parameters"/>
+        <soap:header message="hpb:HeaderMsg" part="header" use="literal"/>
+      </wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+      <wsdl:fault name="Error"><soap:fault name="Error" use="literal"/></wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="GetTransferStatus">
+      <soap:operation soapAction="http://harbourpoint.example/bank/v1/GetTransferStatus" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal" parts="parameters"/>
+        <soap:header message="hpb:HeaderMsg" part="header" use="literal"/>
+      </wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+      <wsdl:fault name="Error"><soap:fault name="Error" use="literal"/></wsdl:fault>
+    </wsdl:operation>
+  </wsdl:binding>
+
+  <wsdl:service name="PaymentService">
+    <wsdl:port name="PaymentServicePort" binding="hpb:PaymentServiceBinding">
+      <soap:address location="http://localhost:7800/payment"/>
+    </wsdl:port>
+  </wsdl:service>
+</wsdl:definitions>

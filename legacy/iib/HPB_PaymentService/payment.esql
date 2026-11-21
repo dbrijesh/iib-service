@@ -1,0 +1,407 @@
+BROKER SCHEMA hpb.payment
+PATH hpb.common;
+
+DECLARE NS NAMESPACE 'http://harbourpoint.example/bank/v1';
+
+/* Test hook: set to 'YYYY-MM-DD HHMM' (London local time) to pin the clock for
+   R12 / R14 boundary tests. Empty means use the database clock. */
+DECLARE ClockOverride EXTERNAL CHARACTER '';
+
+CREATE FUNCTION Pounds(IN minor INTEGER) RETURNS DECIMAL
+BEGIN
+	RETURN ROUND(CAST(minor AS DECIMAL) / 100, 2);
+END;
+
+CREATE COMPUTE MODULE Payment_Dispatch
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		IF Environment.HPB.Operation = 'InitiateTransferRequest' THEN
+			PROPAGATE TO TERMINAL 'out';
+		ELSEIF Environment.HPB.Operation = 'GetTransferStatusRequest' THEN
+			PROPAGATE TO TERMINAL 'out1';
+		ELSE
+			CALL Fail('HPB-400-OPERATION', 'Unknown operation', 'Client');
+		END IF;
+		RETURN FALSE;
+	END;
+END MODULE;
+
+
+/* ---- InitiateTransfer step 1: R11 idempotency (commits on its own) ----
+   out  = new transfer, carry on
+   out1 = replay of an earlier request, go straight to the reply          */
+CREATE COMPUTE MODULE Pay_Idempotency
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE req  REFERENCE TO Environment.HPB.Req;
+		DECLARE chan CHARACTER Environment.HPB.ChannelId;
+		DECLARE ref  CHARACTER TRIM(COALESCE(req.NS:clientRef, ''));
+		IF ref = '' OR LENGTH(ref) > 64 THEN
+			CALL Fail('HPB-400-CLIENTREF', 'clientRef is required (max 64 characters)', 'Client');
+		END IF;
+		DECLARE fromAcct CHARACTER UPPER(TRIM(COALESCE(req.NS:fromAccount, '')));
+		DECLARE toAcct   CHARACTER UPPER(TRIM(COALESCE(req.NS:toAccount, '')));
+		DECLARE amt DECIMAL COALESCE(CAST(req.NS:amount AS DECIMAL), 0);
+		DECLARE amountMinor INTEGER CAST(ROUND(amt * 100, 0 MODE ROUND_HALF_UP) AS INTEGER);
+
+		-- R11: keys older than 24 hours no longer count
+		PASSTHRU('DELETE FROM idempotency WHERE channel_id = ? AND client_ref = ? ' ||
+		         'AND created_at < now() - interval ''24 hours''', chan, ref);
+
+		SET Environment.Pay.NewId[] = PASSTHRU(
+			'SELECT ''TRF'' || lpad(nextval(''core.transfer_seq'')::text, 9, ''0'') AS transfer_id');
+		DECLARE newId CHARACTER Environment.Pay.NewId[1].transfer_id;
+
+		PASSTHRU('INSERT INTO idempotency (channel_id, client_ref, transfer_id) VALUES (?, ?, ?) ' ||
+		         'ON CONFLICT (channel_id, client_ref) DO NOTHING', chan, ref, newId);
+
+		SET Environment.Pay.Idem[] = PASSTHRU(
+			'SELECT i.transfer_id AS key_id, t.status AS status, t.fee_minor AS fee_minor, ' ||
+			'       to_char(t.value_date, ''YYYY-MM-DD'') AS value_date ' ||
+			'FROM idempotency i LEFT JOIN transfer t ON t.transfer_id = i.transfer_id ' ||
+			'WHERE i.channel_id = ? AND i.client_ref = ?', chan, ref);
+		DECLARE idem REFERENCE TO Environment.Pay.Idem[1];
+
+		SET OutputRoot = InputRoot;
+		IF idem.key_id <> newId THEN
+			-- same ChannelId and clientRef within 24 hours: return the original, post nothing
+			SET Environment.Pay.TransferId = idem.key_id;
+			SET Environment.Pay.Status     = COALESCE(idem.status, 'ACCEPTED');
+			SET Environment.Pay.FeeMinor   = COALESCE(idem.fee_minor, 0);
+			SET Environment.Pay.ValueDate  = idem.value_date;
+			SET Environment.Pay.Replay     = TRUE;
+			PROPAGATE TO TERMINAL 'out1';
+			RETURN FALSE;
+		END IF;
+
+		PASSTHRU('INSERT INTO transfer (transfer_id, client_ref, from_account, to_account, amount_minor, status) ' ||
+		         'VALUES (?, ?, ?, ?, ?, ''ACCEPTED'')', newId, ref, fromAcct, toAcct, amountMinor);
+		SET Environment.Pay.TransferId = newId;
+		SET Environment.Pay.Status     = 'ACCEPTED';
+		SET Environment.Pay.FeeMinor   = 0;
+		SET Environment.Pay.Replay     = FALSE;
+		PROPAGATE TO TERMINAL 'out';
+		RETURN FALSE;
+	END;
+END MODULE;
+
+
+/* ---- step 2: R12 validation, R13 fee, R14 value date -------------------
+   out  = valid
+   out1 = rejected (reason in Environment.Pay.RejectCode / RejectMsg)       */
+CREATE COMPUTE MODULE Pay_Validate
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		IF Check() THEN
+			PROPAGATE TO TERMINAL 'out';
+		ELSE
+			PROPAGATE TO TERMINAL 'out1';
+		END IF;
+		RETURN FALSE;
+	END;
+
+	CREATE FUNCTION Reject(IN code CHARACTER, IN msg CHARACTER) RETURNS BOOLEAN
+	BEGIN
+		SET Environment.Pay.RejectCode = code;
+		SET Environment.Pay.RejectMsg  = msg;
+		RETURN FALSE;
+	END;
+
+	CREATE FUNCTION IsBusinessDay(IN d CHARACTER) RETURNS BOOLEAN
+	BEGIN
+		SET Environment.Pay.Biz[] = PASSTHRU(
+			'SELECT CASE WHEN extract(isodow FROM CAST(? AS date)) < 6 ' ||
+			'  AND NOT EXISTS (SELECT 1 FROM bank_holiday WHERE holiday_date = CAST(? AS date)) ' ||
+			'THEN 1 ELSE 0 END AS biz', d, d);
+		RETURN (Environment.Pay.Biz[1].biz = 1);
+	END;
+
+	CREATE FUNCTION NextBusinessDay(IN d CHARACTER) RETURNS CHARACTER
+	BEGIN
+		DECLARE n CHARACTER d;
+		REPEAT
+			SET Environment.Pay.Nxt[] = PASSTHRU('SELECT to_char(CAST(? AS date) + 1, ''YYYY-MM-DD'') AS d', n);
+			SET n = Environment.Pay.Nxt[1].d;
+		UNTIL IsBusinessDay(n)
+		END REPEAT;
+		RETURN n;
+	END;
+
+	CREATE FUNCTION Check() RETURNS BOOLEAN
+	BEGIN
+		DECLARE req REFERENCE TO Environment.HPB.Req;
+		DECLARE fromAcct CHARACTER UPPER(TRIM(COALESCE(req.NS:fromAccount, '')));
+		DECLARE toAcct   CHARACTER UPPER(TRIM(COALESCE(req.NS:toAccount, '')));
+		DECLARE amt DECIMAL COALESCE(CAST(req.NS:amount AS DECIMAL), 0);
+
+		-- R12: amount above 0, at most 2 decimal places
+		IF amt <= 0 OR amt <> ROUND(amt, 2 MODE ROUND_DOWN) THEN
+			RETURN Reject('HPB-422-AMOUNT', 'Amount must be above 0 with at most 2 decimal places');
+		END IF;
+		DECLARE amountMinor INTEGER CAST(ROUND(amt * 100, 0 MODE ROUND_HALF_UP) AS INTEGER);
+
+		-- R12: both accounts active and internal
+		IF fromAcct = toAcct THEN
+			RETURN Reject('HPB-422-SAME-ACCOUNT', 'Source and destination account are the same');
+		END IF;
+		SET Environment.Pay.From[] = PASSTHRU(
+			'SELECT account_id, cust_id, ledger_bal_minor, overdraft_limit_minor, status ' ||
+			'FROM account WHERE account_id = ?', fromAcct);
+		IF CARDINALITY(Environment.Pay.From[]) = 0 OR Environment.Pay.From[1].status <> 'A' THEN
+			RETURN Reject('HPB-422-FROM-ACCOUNT', 'Source account is not an active internal account');
+		END IF;
+		SET Environment.Pay.To[] = PASSTHRU('SELECT account_id, status FROM account WHERE account_id = ?', toAcct);
+		IF CARDINALITY(Environment.Pay.To[]) = 0 OR Environment.Pay.To[1].status <> 'A' THEN
+			RETURN Reject('HPB-422-TO-ACCOUNT', 'Destination account is not an active internal account');
+		END IF;
+
+		-- R13: transfers above 5,000.00 pay 0.1%, rounded half-up to the penny, capped at 25.00
+		DECLARE fee DECIMAL 0;
+		IF amountMinor > 500000 THEN
+			SET fee = ROUND(amt * 0.001, 2 MODE ROUND_HALF_UP);
+			IF fee > 25.00 THEN
+				SET fee = 25.00;
+			END IF;
+		END IF;
+		DECLARE feeMinor INTEGER CAST(ROUND(fee * 100, 0 MODE ROUND_HALF_UP) AS INTEGER);
+
+		-- R12 + R6: available balance must cover amount plus fee
+		SET Environment.Pay.Hold[] = PASSTHRU(
+			'SELECT COALESCE(SUM(amount_minor), 0) AS holds FROM account_hold ' ||
+			'WHERE account_id = ? AND expires_at > now()', fromAcct);
+		DECLARE holdsMinor INTEGER CAST(Environment.Pay.Hold[1].holds AS INTEGER);
+		DECLARE available INTEGER Environment.Pay.From[1].ledger_bal_minor
+		                        + Environment.Pay.From[1].overdraft_limit_minor - holdsMinor;
+		IF available < amountMinor + feeMinor THEN
+			RETURN Reject('HPB-422-FUNDS', 'Available balance does not cover the amount plus fee');
+		END IF;
+
+		-- Europe/London clock (never server UTC)
+		DECLARE lnDate CHARACTER;
+		DECLARE lnHm   CHARACTER;
+		IF ClockOverride <> '' THEN
+			SET lnDate = SUBSTRING(ClockOverride FROM 1 FOR 10);
+			SET lnHm   = SUBSTRING(ClockOverride FROM 12 FOR 4);
+		ELSE
+			SET Environment.Pay.Clk[] = PASSTHRU(
+				'SELECT to_char(now() AT TIME ZONE ''Europe/London'', ''YYYY-MM-DD'') AS d, ' ||
+				'       to_char(now() AT TIME ZONE ''Europe/London'', ''HH24MI'') AS hm');
+			SET lnDate = Environment.Pay.Clk[1].d;
+			SET lnHm   = Environment.Pay.Clk[1].hm;
+		END IF;
+
+		-- R12: 10,000.00 per customer per London calendar day, over completed transfers
+		SET Environment.Pay.Day[] = PASSTHRU(
+			'SELECT COALESCE(SUM(t.amount_minor), 0) AS total FROM transfer t ' ||
+			'JOIN account a ON a.account_id = t.from_account ' ||
+			'WHERE a.cust_id = ? AND t.status = ''COMPLETED'' ' ||
+			'  AND (t.completed_at AT TIME ZONE ''Europe/London'')::date = CAST(? AS date)',
+			Environment.Pay.From[1].cust_id, lnDate);
+		DECLARE doneToday INTEGER CAST(Environment.Pay.Day[1].total AS INTEGER);
+		IF doneToday + amountMinor > 1000000 THEN
+			RETURN Reject('HPB-422-LIMIT', 'Daily transfer limit of 10,000.00 would be exceeded');
+		END IF;
+
+		-- R14: after 17:30, weekends and bank holidays post now with the next business day as value date
+		DECLARE valueDate CHARACTER lnDate;
+		IF CAST(lnHm AS INTEGER) >= 1730 OR NOT IsBusinessDay(lnDate) THEN
+			SET valueDate = NextBusinessDay(lnDate);
+		END IF;
+
+		SET Environment.Pay.AmountMinor = amountMinor;
+		SET Environment.Pay.FeeMinor    = feeMinor;
+		SET Environment.Pay.ValueDate   = valueDate;
+		SET Environment.Pay.FromAcct    = fromAcct;
+		SET Environment.Pay.ToAcct      = toAcct;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/* Rejected: remember the outcome so a retry with the same clientRef sees REJECTED */
+CREATE COMPUTE MODULE Pay_RecordRejected
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		PASSTHRU('UPDATE transfer SET status = ''REJECTED'', reject_code = ? WHERE transfer_id = ?',
+		         Environment.Pay.RejectCode, Environment.Pay.TransferId);
+		SET OutputRoot = InputRoot;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE Pay_ThrowRejected
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL Fail(Environment.Pay.RejectCode, Environment.Pay.RejectMsg, 'Client');
+		RETURN FALSE;
+	END;
+END MODULE;
+
+
+/* ---- Leg 1: debit the source and post the fee. Its own commit. ---- */
+CREATE COMPUTE MODULE Pay_Debit
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE narr CHARACTER LEFT(TRIM(COALESCE(Environment.HPB.Req.NS:narrative, 'Transfer')), 100);
+		DECLARE tid  CHARACTER Environment.Pay.TransferId;
+		DECLARE amountMinor INTEGER Environment.Pay.AmountMinor;
+		DECLARE feeMinor    INTEGER Environment.Pay.FeeMinor;
+
+		PASSTHRU('UPDATE account SET ledger_bal_minor = ledger_bal_minor - ? WHERE account_id = ?',
+		         amountMinor + feeMinor, Environment.Pay.FromAcct);
+		PASSTHRU('INSERT INTO ledger_entry (account_id, posted_at, amount_minor, narrative, transfer_id) ' ||
+		         'VALUES (?, now(), ?, ?, ?)', Environment.Pay.FromAcct, -amountMinor, narr, tid);
+		IF feeMinor > 0 THEN
+			PASSTHRU('INSERT INTO ledger_entry (account_id, posted_at, amount_minor, narrative, transfer_id) ' ||
+			         'VALUES (?, now(), ?, ?, ?)', Environment.Pay.FromAcct, -feeMinor, 'Transfer fee', tid);
+		END IF;
+		SET OutputRoot = InputRoot;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* ---- Leg 2: credit the destination. A separate commit. If it throws, the
+   node's failure terminal feeds Pay_Compensate. ---- */
+CREATE COMPUTE MODULE Pay_Credit
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE narr CHARACTER LEFT(TRIM(COALESCE(Environment.HPB.Req.NS:narrative, 'Transfer')), 100);
+		DECLARE amountMinor INTEGER Environment.Pay.AmountMinor;
+
+		PASSTHRU('UPDATE account SET ledger_bal_minor = ledger_bal_minor + ? WHERE account_id = ?',
+		         amountMinor, Environment.Pay.ToAcct);
+		PASSTHRU('INSERT INTO ledger_entry (account_id, posted_at, amount_minor, narrative, transfer_id) ' ||
+		         'VALUES (?, now(), ?, ?, ?)', Environment.Pay.ToAcct, amountMinor, narr, Environment.Pay.TransferId);
+		SET OutputRoot = InputRoot;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* ---- Catch path: put the money back on the source and mark COMPENSATED ---- */
+CREATE COMPUTE MODULE Pay_Compensate
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE tid CHARACTER Environment.Pay.TransferId;
+		DECLARE total INTEGER Environment.Pay.AmountMinor + Environment.Pay.FeeMinor;
+
+		PASSTHRU('UPDATE account SET ledger_bal_minor = ledger_bal_minor + ? WHERE account_id = ?',
+		         total, Environment.Pay.FromAcct);
+		PASSTHRU('INSERT INTO ledger_entry (account_id, posted_at, amount_minor, narrative, transfer_id) ' ||
+		         'VALUES (?, now(), ?, ?, ?)', Environment.Pay.FromAcct, total, 'Reversal of ' || tid, tid);
+		PASSTHRU('UPDATE transfer SET status = ''COMPENSATED'', reject_code = ''HPB-500-CREDIT-FAILED'' ' ||
+		         'WHERE transfer_id = ?', tid);
+		SET OutputRoot = InputRoot;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+CREATE COMPUTE MODULE Pay_ThrowCompensated
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL Fail('HPB-500-CREDIT-FAILED',
+		          'Credit failed; transfer ' || Environment.Pay.TransferId || ' was compensated', 'Server');
+		RETURN FALSE;
+	END;
+END MODULE;
+
+
+/* ---- Both legs done: write the transfer row ---- */
+CREATE COMPUTE MODULE Pay_Complete
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		PASSTHRU('UPDATE transfer SET status = ''COMPLETED'', fee_minor = ?, ' ||
+		         'value_date = CAST(? AS date), completed_at = now() WHERE transfer_id = ?',
+		         Environment.Pay.FeeMinor, Environment.Pay.ValueDate, Environment.Pay.TransferId);
+		SET Environment.Pay.Status = 'COMPLETED';
+		SET OutputRoot = InputRoot;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* Message for the Publication node: topic HPB/TRANSFERS/COMPLETED */
+CREATE COMPUTE MODULE Pay_BuildEvent
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot.Properties.MessageDomain = 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot DOMAIN('XMLNSC') NAME 'XMLNSC';
+		CREATE LASTCHILD OF OutputRoot.XMLNSC AS ev NAMESPACE NS NAME 'TransferCompleted';
+		SET ev.NS:transferId     = Environment.Pay.TransferId;
+		SET ev.NS:clientRef      = TRIM(Environment.HPB.Req.NS:clientRef);
+		SET ev.NS:fromAccount    = Environment.Pay.FromAcct;
+		SET ev.NS:toAccount      = Environment.Pay.ToAcct;
+		SET ev.NS:amount         = Pounds(Environment.Pay.AmountMinor);
+		SET ev.NS:feeAmount      = Pounds(Environment.Pay.FeeMinor);
+		SET ev.NS:valueDate      = Environment.Pay.ValueDate;
+		SET ev.NS:correlationId  = Environment.HPB.CorrelationId;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+/* Reply for both new transfers and R11 replays */
+CREATE COMPUTE MODULE Pay_BuildReply
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot.Properties.MessageDomain = 'SOAP';
+		SET OutputRoot.SOAP.Context = Environment.HPB.Ctx;
+		CREATE LASTCHILD OF OutputRoot.SOAP NAME 'Body';
+		CREATE LASTCHILD OF OutputRoot.SOAP.Body AS resp NAMESPACE NS NAME 'InitiateTransferResponse';
+		SET resp.NS:transferId = Environment.Pay.TransferId;
+		SET resp.NS:status     = Environment.Pay.Status;
+		SET resp.NS:feeAmount  = Pounds(Environment.Pay.FeeMinor);
+		IF Environment.Pay.ValueDate IS NOT NULL THEN
+			SET resp.NS:valueDate = Environment.Pay.ValueDate;
+		END IF;
+		SET resp.NS:idempotentReplay = Environment.Pay.Replay;
+		SET Environment.HPB.Outcome  = 'OK';
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/* ---- GetTransferStatus: by transferId, or by clientRef within the caller's channel ---- */
+CREATE COMPUTE MODULE Pay_GetStatus
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		DECLARE req REFERENCE TO Environment.HPB.Req;
+		DECLARE tid CHARACTER TRIM(COALESCE(req.NS:transferId, ''));
+		DECLARE ref CHARACTER TRIM(COALESCE(req.NS:clientRef, ''));
+		IF tid <> '' THEN
+			SET Environment.Pay.T[] = PASSTHRU(
+				'SELECT transfer_id, client_ref, from_account, to_account, amount_minor, fee_minor, status, ' ||
+				'       to_char(value_date, ''YYYY-MM-DD'') AS value_date ' ||
+				'FROM transfer WHERE transfer_id = ?', UPPER(tid));
+		ELSEIF ref <> '' THEN
+			SET Environment.Pay.T[] = PASSTHRU(
+				'SELECT t.transfer_id, t.client_ref, t.from_account, t.to_account, t.amount_minor, t.fee_minor, t.status, ' ||
+				'       to_char(t.value_date, ''YYYY-MM-DD'') AS value_date ' ||
+				'FROM transfer t JOIN idempotency i ON i.transfer_id = t.transfer_id ' ||
+				'WHERE i.channel_id = ? AND i.client_ref = ?', Environment.HPB.ChannelId, ref);
+		ELSE
+			CALL Fail('HPB-400-TRANSFER-KEY', 'Supply transferId or clientRef', 'Client');
+		END IF;
+		IF CARDINALITY(Environment.Pay.T[]) = 0 THEN
+			CALL Fail('HPB-404-TRANSFER', 'Transfer not found', 'Client');
+		END IF;
+		DECLARE t REFERENCE TO Environment.Pay.T[1];
+
+		SET OutputRoot = InputRoot;
+		DELETE FIELD OutputRoot.SOAP.Header;
+		DELETE FIELD OutputRoot.SOAP.Body;
+		CREATE LASTCHILD OF OutputRoot.SOAP NAME 'Body';
+		CREATE LASTCHILD OF OutputRoot.SOAP.Body AS resp NAMESPACE NS NAME 'GetTransferStatusResponse';
+		SET resp.NS:transferId  = t.transfer_id;
+		SET resp.NS:clientRef   = t.client_ref;
+		SET resp.NS:fromAccount = t.from_account;
+		SET resp.NS:toAccount   = t.to_account;
+		SET resp.NS:amount      = Pounds(t.amount_minor);
+		SET resp.NS:feeAmount   = Pounds(t.fee_minor);
+		IF t.value_date IS NOT NULL THEN
+			SET resp.NS:valueDate = t.value_date;
+		END IF;
+		SET resp.NS:status = TRIM(t.status);
+		SET Environment.HPB.Outcome = 'OK';
+		RETURN TRUE;
+	END;
+END MODULE;

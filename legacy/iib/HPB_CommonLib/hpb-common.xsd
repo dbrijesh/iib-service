@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Shared SOAP header and fault detail for every Harbour Point service -->
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+            xmlns:hpb="http://harbourpoint.example/bank/v1"
+            targetNamespace="http://harbourpoint.example/bank/v1"
+            elementFormDefault="qualified">
+
+  <xsd:simpleType name="ChannelType">
+    <xsd:restriction base="xsd:string">
+      <xsd:enumeration value="MOBILE"/>
+      <xsd:enumeration value="WEB"/>
+      <xsd:enumeration value="BRANCH"/>
+      <xsd:enumeration value="PARTNER"/>
+    </xsd:restriction>
+  </xsd:simpleType>
+
+  <!-- SOAP header: ChannelId is set by API Connect, never trusted from the caller -->
+  <xsd:element name="Header">
+    <xsd:complexType>
+      <xsd:sequence>
+        <xsd:element name="ChannelId" type="hpb:ChannelType"/>
+        <xsd:element name="CorrelationId" type="xsd:string" minOccurs="0"/>
+      </xsd:sequence>
+    </xsd:complexType>
+  </xsd:element>
+
+  <!-- SOAP fault detail. Code looks like HPB-404-CUSTOMER -->
+  <xsd:element name="Error">
+    <xsd:complexType>
+      <xsd:sequence>
+        <xsd:element name="Code" type="xsd:string"/>
+        <xsd:element name="Message" type="xsd:string"/>
+        <xsd:element name="CorrelationId" type="xsd:string"/>
+      </xsd:sequence>
+    </xsd:complexType>
+  </xsd:element>
+</xsd:schema>

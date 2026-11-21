@@ -1,0 +1,8 @@
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:hpb="http://harbourpoint.example/bank/v1">
+  <soapenv:Header>
+    <hpb:Header><hpb:ChannelId>WEB</hpb:ChannelId></hpb:Header>
+  </soapenv:Header>
+  <soapenv:Body>
+    <hpb:GetTransactionHistoryRequest><hpb:accountId>HPB10000001</hpb:accountId><hpb:fromDate>2026-01-01</hpb:fromDate><hpb:toDate>2026-11-01</hpb:toDate><hpb:pageSize>100</hpb:pageSize></hpb:GetTransactionHistoryRequest>
+  </soapenv:Body>
+</soapenv:Envelope>

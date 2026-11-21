@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ecore:EPackage xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI"
+    xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore"
+    xmlns:eflow="http://www.ibm.com/wbi/2005/eflow"
+    xmlns:utility="http://www.ibm.com/wbi/2005/eflow_utility"
+    xmlns:ComIbmCompute.msgnode="ComIbmCompute.msgnode"
+    xmlns:ComIbmMQInput.msgnode="ComIbmMQInput.msgnode"
+    xmlns:ComIbmMQOutput.msgnode="ComIbmMQOutput.msgnode"
+    xmlns:ComIbmResetContentDescriptor.msgnode="ComIbmResetContentDescriptor.msgnode"
+    nsURI="HPB_CoreStub/CoreStub.msgflow" nsPrefix="HPB_CoreStub_CoreStub.msgflow">
+  <eClassifiers xmi:type="eflow:FCMComposite" name="FCMComposite_1">
+    <eSuperTypes href="http://www.ibm.com/wbi/2005/eflow#//FCMBlock"/>
+    <composition>
+      <nodes xmi:type="ComIbmMQInput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_2" location="40,40" queueName="CORE.CUST.REQ" messageDomainProperty="BLOB">
+        <translation xmi:type="utility:ConstantString" string="CORE.CUST.REQ"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_3" location="200,40" computeExpression="esql://routine/hpb.corestub#Stub_Route.Main">
+        <translation xmi:type="utility:ConstantString" string="Route on FUNC-CODE"/>
+      </nodes>
+      <nodes xmi:type="ComIbmResetContentDescriptor.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_4" location="360,40" messageDomain="DFDL" messageSet="HPB_CustomerService" messageType="{}:CUSTREC" resetMessageDomain="true">
+        <translation xmi:type="utility:ConstantString" string="Parse as CUSTREC"/>
+      </nodes>
+      <nodes xmi:type="ComIbmResetContentDescriptor.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_5" location="360,140" messageDomain="DFDL" messageSet="HPB_CustomerService" messageType="{}:CUSTUPD" resetMessageDomain="true">
+        <translation xmi:type="utility:ConstantString" string="Parse as CUSTUPD"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_6" location="520,40" computeExpression="esql://routine/hpb.corestub#Stub_Read.Main" dataSource="HPBDB">
+        <translation xmi:type="utility:ConstantString" string="Read customer"/>
+      </nodes>
+      <nodes xmi:type="ComIbmCompute.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_7" location="520,140" computeExpression="esql://routine/hpb.corestub#Stub_Update.Main" dataSource="HPBDB">
+        <translation xmi:type="utility:ConstantString" string="Update customer"/>
+      </nodes>
+      <nodes xmi:type="ComIbmMQOutput.msgnode:FCMComposite_1" xmi:id="FCMComposite_1_8" location="680,40" destinationMode="destinationList">
+        <translation xmi:type="utility:ConstantString" string="Reply to ReplyToQ"/>
+      </nodes>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_1" targetNode="FCMComposite_1_3" sourceNode="FCMComposite_1_2" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_2" targetNode="FCMComposite_1_4" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_3" targetNode="FCMComposite_1_5" sourceNode="FCMComposite_1_3" sourceTerminalName="OutTerminal.out1" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_4" targetNode="FCMComposite_1_6" sourceNode="FCMComposite_1_4" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_5" targetNode="FCMComposite_1_7" sourceNode="FCMComposite_1_5" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_6" targetNode="FCMComposite_1_8" sourceNode="FCMComposite_1_6" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+      <connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_7" targetNode="FCMComposite_1_8" sourceNode="FCMComposite_1_7" sourceTerminalName="OutTerminal.out" targetTerminalName="InTerminal.in"/>
+    </composition>
+    <propertyOrganizer/>
+    <stickyBoard/>
+  </eClassifiers>
+</ecore:EPackage>

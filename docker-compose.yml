@@ -1,0 +1,50 @@
+# Harbour Point Bank - legacy estate back ends (database + MQ).
+# IIB / ACE and API Connect run separately (see README.md).
+services:
+  postgres:
+    image: postgres:16
+    container_name: hpb-postgres
+    environment:
+      POSTGRES_DB: hpb
+      POSTGRES_USER: hpb
+      POSTGRES_PASSWORD: hpb
+    ports:
+      - "5432:5432"
+    volumes:
+      # Files in docker-entrypoint-initdb.d run in name order on first start
+      - ./legacy/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./legacy/db/bank_holidays.sql:/docker-entrypoint-initdb.d/02-bank-holidays.sql:ro
+      - ./legacy/db/seed.sql:/docker-entrypoint-initdb.d/03-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hpb -d hpb"]
+      interval: 5s
+      retries: 10
+
+  mq:
+    image: icr.io/ibm-messaging/mq:latest
+    container_name: hpb-mq
+    environment:
+      LICENSE: accept
+      MQ_QMGR_NAME: HPBQM1
+      MQ_ADMIN_PASSWORD: passw0rd
+      MQ_APP_PASSWORD: passw0rd
+    ports:
+      - "1414:1414"     # listener
+      - "9443:9443"     # web console  https://localhost:9443/ibmmq/console  (admin / passw0rd)
+    volumes:
+      - ./legacy/mq/hpb.mqsc:/etc/mqm/hpb.mqsc:ro
+
+  # IIB / ACE integration server: uncomment once you have an image or install.
+  # ACE 12/13 Developer Edition is free for development and imports IIB 10 projects.
+  # Needs: odbc.ini (legacy/deploy/odbc.ini), server.conf.yaml (legacy/deploy/server.conf.yaml)
+  #        and the BAR built by legacy/deploy/build-bar.sh mounted into the work dir.
+  # ace:
+  #   image: <your ACE developer image>
+  #   container_name: hpb-ace
+  #   depends_on: [postgres, mq]
+  #   ports:
+  #     - "7800:7800"   # HTTP listener (SOAP)
+  #   volumes:
+  #     - ./legacy/deploy/out:/home/aceuser/initial-config/bars
+  #     - ./legacy/deploy/odbc.ini:/home/aceuser/ace-server/odbc.ini
+  #     - ./legacy/deploy/server.conf.yaml:/home/aceuser/ace-server/server.conf.yaml

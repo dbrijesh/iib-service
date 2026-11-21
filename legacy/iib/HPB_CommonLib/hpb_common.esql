@@ -1,0 +1,115 @@
+BROKER SCHEMA hpb.common
+
+DECLARE NS NAMESPACE 'http://harbourpoint.example/bank/v1';
+
+/* Raise a business or technical error. kind is 'Client' or 'Server' and becomes
+   the SOAP faultcode. SF_ErrorHandler turns this into an hpb:Error fault. */
+CREATE PROCEDURE Fail(IN code CHARACTER, IN msg CHARACTER, IN kind CHARACTER)
+BEGIN
+	THROW USER EXCEPTION MESSAGE 2951 VALUES(code, msg, kind);
+END;
+
+/* Name of the first element under SOAP.Body, i.e. the operation request */
+CREATE FUNCTION OperationOf(IN body REFERENCE) RETURNS CHARACTER
+BEGIN
+	RETURN FIELDNAME(body.*[1]);
+END;
+
+/* Correlation id: X-Correlation-ID HTTP header (set by API Connect),
+   else the SOAP header, else a new UUID. Stored in Environment.HPB. */
+CREATE PROCEDURE EnsureCorrelation(IN env REFERENCE, IN inRoot REFERENCE)
+BEGIN
+	IF env.HPB.CorrelationId IS NULL THEN
+		DECLARE cid CHARACTER COALESCE(inRoot.HTTPInputHeader."X-Correlation-ID",
+		                               inRoot.SOAP.Header.NS:Header.NS:CorrelationId);
+		IF cid IS NULL OR cid = '' THEN
+			SET cid = UUIDASCHAR;
+		END IF;
+		SET env.HPB.CorrelationId = cid;
+	END IF;
+END;
+
+
+/* SF_ValidateHeader: ChannelId must be MOBILE, WEB, BRANCH or PARTNER */
+CREATE COMPUTE MODULE SF_ValidateHeader_Check
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL EnsureCorrelation(Environment, InputRoot);
+		DECLARE ch CHARACTER InputRoot.SOAP.Header.NS:Header.NS:ChannelId;
+		IF ch IS NULL OR ch NOT IN ('MOBILE', 'WEB', 'BRANCH', 'PARTNER') THEN
+			CALL Fail('HPB-400-CHANNEL', 'ChannelId is missing or not one of MOBILE, WEB, BRANCH, PARTNER', 'Client');
+		END IF;
+		SET Environment.HPB.ChannelId = ch;
+		SET OutputRoot = InputRoot;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/* SF_Audit: first pass (on the way in) writes RECEIVED and remembers the request.
+   Second pass (just before SOAPReply) writes the outcome set by the flow ('OK'). */
+CREATE COMPUTE MODULE SF_Audit_Write
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL EnsureCorrelation(Environment, InputRoot);
+		DECLARE phase CHARACTER COALESCE(Environment.HPB.Outcome, 'RECEIVED');
+		IF phase = 'RECEIVED' THEN
+			SET Environment.HPB.Operation = OperationOf(InputRoot.SOAP.Body);
+			SET Environment.HPB.Ctx = InputRoot.SOAP.Context;          -- needed again after MQ round trips
+			SET Environment.HPB.Req = InputRoot.SOAP.Body.*[1];       -- the request element, by value
+		END IF;
+		PASSTHRU('INSERT INTO audit_log (correlation_id, operation, outcome, payload_hash) VALUES (?, ?, ?, md5(?))',
+		         Environment.HPB.CorrelationId,
+		         Environment.HPB.Operation,
+		         phase,
+		         CAST(ASBITSTREAM(InputRoot.SOAP.Body.*[1]) AS CHARACTER CCSID 1208));
+		SET OutputRoot = InputRoot;
+		RETURN TRUE;
+	END;
+END MODULE;
+
+
+/* SF_ErrorHandler: find the innermost HPB exception in the ExceptionList and
+   return it as a SOAP fault with an hpb:Error detail. */
+CREATE COMPUTE MODULE SF_ErrorHandler_Build
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL EnsureCorrelation(Environment, InputRoot);
+		DECLARE code CHARACTER 'HPB-500-INTERNAL';
+		DECLARE msg  CHARACTER 'Internal error';
+		DECLARE kind CHARACTER 'Server';
+		DECLARE found BOOLEAN FALSE;
+		DECLARE e REFERENCE TO InputExceptionList.*[1];
+		WHILE LASTMOVE(e) DO
+			IF e.Number = 2951 AND NOT found THEN
+				SET code  = e.Insert[1].Text;
+				SET msg   = e.Insert[2].Text;
+				SET kind  = e.Insert[3].Text;
+				SET found = TRUE;
+			ELSEIF FIELDNAME(e) = 'DatabaseException' AND NOT found THEN
+				SET code = 'HPB-500-DB';
+				SET msg  = 'Database error';
+				SET found = TRUE;
+			END IF;
+			MOVE e LASTCHILD;
+		END WHILE;
+
+		BEGIN
+			DECLARE CONTINUE HANDLER FOR SQLSTATE LIKE '%' BEGIN END;   -- never fail while failing
+			PASSTHRU('INSERT INTO audit_log (correlation_id, operation, outcome) VALUES (?, ?, ?)',
+			         Environment.HPB.CorrelationId,
+			         COALESCE(Environment.HPB.Operation, 'UNKNOWN'),
+			         SUBSTRING('FAULT:' || code FROM 1 FOR 100));
+		END;
+
+		SET OutputRoot = InputRoot;
+		DELETE FIELD OutputRoot.SOAP.Header;
+		DELETE FIELD OutputRoot.SOAP.Body;
+		SET OutputRoot.SOAP.Body.Fault.faultcode   = 'soapenv:' || kind;
+		SET OutputRoot.SOAP.Body.Fault.faultstring = msg;
+		SET OutputRoot.SOAP.Body.Fault.detail.NS:Error.NS:Code          = code;
+		SET OutputRoot.SOAP.Body.Fault.detail.NS:Error.NS:Message       = msg;
+		SET OutputRoot.SOAP.Body.Fault.detail.NS:Error.NS:CorrelationId = Environment.HPB.CorrelationId;
+		RETURN TRUE;
+	END;
+END MODULE;
